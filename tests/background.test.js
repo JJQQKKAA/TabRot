@@ -3,17 +3,18 @@ import assert from 'node:assert/strict';
 import { DEFAULT_SETTINGS } from '../src/core.js';
 const event = () => ({ listeners: [], addListener(fn) { this.listeners.push(fn); } });
 let serial = 0;
-function environment({ local = {}, session = {}, tabs = [] } = {}) {
+function environment({ local = {}, session = {}, tabs = [], bookmarkTree = [] } = {}) {
   const calls = { deliveries: [], localWrites: 0 };
   const storage = area => ({ async get() { return structuredClone(area); }, async set(value) { Object.assign(area, structuredClone(value)); if (area === local) calls.localWrites++; } });
   const api = {
     storage: { local: storage(local), session: storage(session) },
     tabs: { async query() { return structuredClone(tabs); }, async get(id) { const t = tabs.find(t => t.id === id); if (!t) throw new Error('Tab closed'); return structuredClone(t); }, async sendMessage(id, m) { calls.deliveries.push({ id, ...m }); }, async update(id, data) { Object.assign(tabs.find(t => t.id === id), data); }, onCreated: event(), onUpdated: event(), onActivated: event(), onRemoved: event(), onReplaced: event() },
+    bookmarks: { async getTree() { return structuredClone(bookmarkTree); }, onCreated: event(), onRemoved: event(), onChanged: event(), onImportBegan: event(), onImportEnded: event() },
     alarms: { async get() { return null; }, async create() {}, onAlarm: event() }, scripting: { async executeScript() {} }, windows: { async update() {} },
     runtime: { getURL: p => `chrome-extension://test/${p}`, onMessage: event(), onInstalled: event(), onStartup: event() }
   };
   globalThis.chrome = api;
-  return { api, local, session, tabs, calls, async load() { await import(`../src/background.js?test=${serial++}`); }, message(message, sender = { url: 'chrome-extension://test/src/popup.html' }) { return new Promise(resolve => api.runtime.onMessage.listeners[0](message, sender, resolve)); } };
+  return { api, local, session, tabs, calls, bookmarkTree, async load() { await import(`../src/background.js?test=${serial++}`); }, message(message, sender = { url: 'chrome-extension://test/src/popup.html' }) { return new Promise(resolve => api.runtime.onMessage.listeners[0](message, sender, resolve)); } };
 }
 const tab = (id, url = 'https://example.com/article', index = 0) => ({ id, url, index, windowId: 1, title: `Article ${id}`, active: false, pinned: false });
 
@@ -70,4 +71,45 @@ test('service worker suspension keeps session bindings even with duplicate URLs'
   const after = await awake.message({ type: 'SNAPSHOT' });
   assert.equal(after.items.find(i => i.tabId === 1).id, first.id); assert.equal(after.items.find(i => i.tabId === 1).status, 'read');
   assert.equal(after.items.find(i => i.tabId === 2).status, 'unread');
+});
+
+test('all unread pages receive title markers without bookmarks access or favicon rendering', async () => {
+  const env = environment({ tabs: [tab(1), tab(2, 'https://other.org/read')] });
+  delete env.api.bookmarks; await env.load();
+  env.api.alarms.onAlarm.listeners[0]({ name: 'tabrot-refresh' });
+  let snap = await env.message({ type: 'SNAPSHOT' });
+  assert.ok(snap.items.every(item => item.color && item.status === 'unread'));
+  for (const id of [1, 2]) {
+    const render = env.calls.deliveries.findLast(item => item.id === id);
+    assert.equal(render.titleMarker, '☀️'); assert.equal(render.color, undefined); assert.equal(render.repairLegacyIcons, true);
+  }
+  const first = snap.items[0];
+  snap = await env.message({ type: 'ACTION', tabId: first.tabId, recordId: first.id, action: 'read' });
+  assert.equal(env.calls.deliveries.findLast(item => item.id === first.tabId).titleMarker, null);
+  assert.equal(snap.items.find(item => item.id === first.id).openedAt, first.openedAt);
+});
+
+test('custom icon stages are independent from Popup color timing and survive worker restart', async () => {
+  const env = environment({ tabs: [tab(1)] }); await env.load();
+  const before = await env.message({ type: 'SNAPSHOT' });
+  const stages = [{ afterMinutes: 0, icon: '🌱' }, { afterMinutes: 0.5, icon: '🌿' }, { afterMinutes: 10, icon: '🍂' }];
+  await env.message({ type: 'SETTINGS', settings: { ...before.settings, emojiStages: stages } });
+  assert.equal(env.calls.deliveries.at(-1).titleMarker, '🌱');
+  assert.deepEqual(env.local.tabrot.settings.thresholds, before.settings.thresholds);
+  env.local.tabrot.records[before.items[0].id].openedAt = Date.now() - 60000;
+  const awake = environment({ local: env.local, session: env.session, tabs: env.tabs }); delete awake.api.bookmarks; await awake.load();
+  awake.api.alarms.onAlarm.listeners[0]({ name: 'tabrot-refresh' });
+  const after = await awake.message({ type: 'SNAPSHOT' });
+  assert.equal(awake.calls.deliveries.at(-1).titleMarker, '🌿'); assert.deepEqual(after.settings.emojiStages, stages);
+  assert.equal(awake.local.tabrot.records[before.items[0].id].titleMarker, '🌿');
+});
+
+test('Popup titles omit only our last marker, preserve natural emoji and accept site title updates', async () => {
+  const env = environment({ tabs: [tab(1)] }); await env.load();
+  env.api.alarms.onAlarm.listeners[0]({ name: 'tabrot-refresh' }); await env.message({ type: 'SNAPSHOT' });
+  env.tabs[0].title = '☀️ Article 1';
+  let snap = await env.message({ type: 'SNAPSHOT' }); assert.equal(snap.items[0].title, 'Article 1');
+  await env.message({ type: 'SOURCE_TITLE', url: env.tabs[0].url, title: 'Updated title' }, { tab: env.tabs[0] });
+  assert.equal(env.local.tabrot.records[snap.items[0].id].title, 'Updated title');
+  env.tabs[0].title = '🌱 Natural title'; snap = await env.message({ type: 'SNAPSHOT' }); assert.equal(snap.items[0].title, '🌱 Natural title');
 });

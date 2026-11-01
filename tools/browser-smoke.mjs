@@ -30,43 +30,43 @@ try {
   worker.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   const extensionId = new URL(worker.url()).host;
   const a = await context.newPage(); await a.goto(`${origin}/one`);
-  await a.waitForFunction(() => document.querySelector('#original-icon').href.startsWith('data:image/png'));
+  await a.waitForFunction(() => document.title.startsWith('☀️ '));
   const popup = await context.newPage(); await popup.setViewportSize({ width: 420, height: 580 }); await popup.goto(`chrome-extension://${extensionId}/src/popup.html`);
   await popup.getByText(titles['/one'], { exact: true }).waitFor();
   const request = message => popup.evaluate(message => chrome.runtime.sendMessage(message), message);
   let snap = await request({ type: 'SNAPSHOT' }); const original = snap.items.find(i => i.url === `${origin}/one`);
   assert.ok(original); assert.equal(original.status, 'unread'); assert.ok(original.favicon.endsWith('/icon.svg'));
-  await a.reload(); await a.waitForFunction(() => document.querySelector('#original-icon').href.startsWith('data:image/png'));
+  await a.reload(); await a.waitForFunction(() => document.title.startsWith('☀️ '));
   snap = await request({ type: 'SNAPSHOT' }); assert.equal(snap.items.find(i => i.id === original.id).openedAt, original.openedAt);
   await popup.getByRole('button', { name: 'Mark as read', exact: true }).click();
-  await a.waitForFunction(() => document.querySelector('#original-icon').getAttribute('href') === '/icon.svg');
+  await a.waitForFunction(() => !document.title.startsWith('☀️ ') && document.querySelector('#original-icon').getAttribute('href') === '/icon.svg');
   await popup.locator('[data-filter="read"]').click(); await popup.getByRole('button', { name: 'Mark as unread' }).click();
-  await a.waitForFunction(() => document.querySelector('#original-icon').href.startsWith('data:image/png'));
+  await a.waitForFunction(() => document.title.startsWith('☀️ '));
   const action = (action, choice) => request({ type: 'ACTION', tabId: original.tabId, recordId: original.id, action, choice });
-  await action('snooze', 'hour'); await a.waitForFunction(() => document.querySelector('#original-icon').getAttribute('href') === '/icon.svg');
+  await action('snooze', 'hour'); await a.waitForFunction(() => !document.title.startsWith('☀️ ') && document.querySelector('#original-icon').getAttribute('href') === '/icon.svg');
   snap = await request({ type: 'SNAPSHOT' }); assert.equal(snap.items.find(i => i.id === original.id).openedAt, original.openedAt);
-  await action('resume'); await a.waitForFunction(() => document.querySelector('#original-icon').href.startsWith('data:image/png'));
+  await action('resume'); await a.waitForFunction(() => document.title.startsWith('☀️ '));
   await a.evaluate(() => { document.querySelector('#original-icon').href = '/icon-two.svg'; });
-  await a.waitForFunction(() => document.querySelector('#original-icon').href.startsWith('data:image/png'));
-  await action('read'); await a.waitForFunction(() => document.querySelector('#original-icon').getAttribute('href') === '/icon-two.svg');
-  await action('unread'); await a.waitForFunction(() => document.querySelector('#original-icon').href.startsWith('data:image/png'));
+  await a.waitForFunction(() => document.title.startsWith('☀️ '));
+  await action('read'); await a.waitForFunction(() => !document.title.startsWith('☀️ ') && document.querySelector('#original-icon').getAttribute('href') === '/icon-two.svg');
+  await action('unread'); await a.waitForFunction(() => document.title.startsWith('☀️ '));
   await popup.evaluate(id => chrome.tabs.update(id, { pinned: true }), original.tabId);
-  await a.waitForFunction(() => document.querySelector('#original-icon').getAttribute('href') === '/icon-two.svg');
+  await a.waitForFunction(() => !document.title.startsWith('☀️ ') && document.querySelector('#original-icon').getAttribute('href') === '/icon-two.svg');
   await popup.evaluate(id => chrome.tabs.update(id, { pinned: false }), original.tabId);
-  await a.waitForFunction(() => document.querySelector('#original-icon').href.startsWith('data:image/png'));
+  await a.waitForFunction(() => document.title.startsWith('☀️ '));
   await a.evaluate(() => history.pushState({}, '', '/new-article'));
   await popup.waitForTimeout(300);
   snap = await request({ type: 'SNAPSHOT' }); assert.notEqual(snap.items.find(i => i.tabId === original.tabId).id, original.id);
   const updated = snap.items.find(i => i.tabId === original.tabId);
   await request({ type: 'ACTION', tabId: updated.tabId, recordId: updated.id, action: 'ignoreDomain' });
-  await a.waitForFunction(() => document.querySelector('#original-icon').getAttribute('href') === '/icon-two.svg');
+  await a.waitForFunction(() => !document.title.startsWith('☀️ ') && document.querySelector('#original-icon').getAttribute('href') === '/icon-two.svg');
   await request({ type: 'SETTINGS', settings: { ...snap.settings, ignoredDomains: [] } });
-  await a.waitForFunction(() => document.querySelector('#original-icon').href.startsWith('data:image/png'));
-  // Failed image fetches must leave a site's original favicon intact.
+  await a.waitForFunction(() => document.title.startsWith('☀️ '));
+  // Page-provided icons, including missing icons, must remain untouched.
   await a.evaluate(() => { document.querySelector('#original-icon').href = '/missing.ico'; });
   await a.waitForFunction(() => document.querySelectorAll('link[rel="icon"]').length === 1 && document.querySelector('#original-icon').getAttribute('href') === '/missing.ico');
   await a.evaluate(() => { document.querySelector('#original-icon').href = '/icon.svg'; });
-  await a.waitForFunction(() => document.querySelector('#original-icon').href.startsWith('data:image/png'));
+  await a.waitForFunction(() => document.title.startsWith('☀️ '));
   const options = await context.newPage(); await options.setViewportSize({ width: 1000, height: 1200 }); await options.goto(`chrome-extension://${extensionId}/src/options.html`);
   await options.locator('#thresholds input').first().waitFor();
   await options.locator('#domains').fill('example.com'); await options.locator('#save').click(); await options.locator('#save-state').filter({ hasText: 'Changes saved' }).waitFor();
@@ -122,7 +122,7 @@ try {
   const restoredItem = restored.items.find(i => i.url === `${origin}/two`);
   assert.ok(restoredItem, 'Chrome must restore the article tab');
   assert.equal(restoredItem.id, beforeRestart.id); assert.equal(restoredItem.openedAt, beforeRestart.openedAt); assert.equal(restoredItem.status, 'read');
-  console.log('PASS: real MV3 loading, automatic tracking, reload persistence, read/unread, snooze/resume, dynamic favicon restoration, pinned exclusion, SPA navigation, domain rules, failed-icon fallback, settings save, search, compact layout (7+ visible rows), menu placement, bilingual persistence/draft preservation and actual browser restart restoration.');
+  console.log('PASS: real MV3 loading, automatic tracking, reload persistence, read/unread, snooze/resume, dynamic title cleanup and unchanged favicons, pinned exclusion, SPA navigation, domain rules, unchanged missing-icon URLs, settings save, search, compact layout (7+ visible rows), menu placement, bilingual persistence/draft preservation and actual browser restart restoration.');
 } finally {
   await context?.close(); await new Promise(resolve => server.close(resolve)); await rm(profile, { recursive: true, force: true });
 }

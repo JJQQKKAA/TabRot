@@ -2,15 +2,15 @@
 
 [简体中文](README.zh-CN.md)
 
-A quiet reading reminder for Chrome. Tabs grow a small colored favicon marker as they age, helping you return to the pages you meant to read.
+A quiet reading reminder for Chrome. Tab titles show aging icons; the compact reading list shows a continuous green-to-red gradient. Website and bookmark favicons stay unchanged.
 
-No accounts, notifications, analytics, AI, or cloud services. Built with plain JavaScript, HTML, and CSS using Manifest V3.
+No accounts, notifications, analytics, AI, or cloud services. Plain JavaScript, HTML and CSS, using Manifest V3.
 
 ![TabRot popup](docs/popup.png)
 
 ## Install
 
-1. Download the source or unzip `dist/TabRot-v1.1.0.zip`.
+1. Download the source or unzip `dist/TabRot-v1.3.0.zip`.
 2. Open `chrome://extensions` and enable **Developer mode**.
 3. Choose **Load unpacked**, then select the directory containing `manifest.json`.
 4. Pin TabRot in the Chrome toolbar.
@@ -19,85 +19,84 @@ Requires Chrome 120 or later. No build step or runtime dependencies.
 
 ## Use
 
-- Open a normal web page. TabRot starts tracking it automatically.
-- A small green-to-red marker shows how long the tab has been open. Refreshing or switching tabs does not reset its timer.
-- Open the popup to browse your tabs, oldest first. Search by title or website, then click a row to jump to the page.
-- Mark a tab as read to restore its original favicon. Reading state is always manual.
-- Use **More actions** to snooze a reminder for an hour, until tomorrow at 9 AM, or for three days. Snoozing preserves the original timer.
-- Ignore an individual tab or an entire website, including its subdomains. Pinned tabs are ignored by default.
-- Adjust color timing and ignore rules in **Settings**.
+- Normal HTTP/HTTPS pages are tracked automatically. Refreshing and switching tabs do not reset their timers.
+- Every unread page receives a title icon, whether bookmarked or not. Website favicons are preserved. Browser-protected pages and some embedded viewers cannot receive title icons.
+- The popup lists pages oldest first, with original titles, original icons, smooth age colors, search and status filters. Click a row to jump to its tab.
+- Mark a tab as read to remove the title icon. Reading state is always manual.
+- Snooze for an hour, until tomorrow at 9 AM, or for three days. Snoozing preserves the original timer.
+- Ignore a tab or a website, including subdomains. Pinned tabs are ignored by default. Pinned tabs hide their titles, so title reminders are not visible even if pinned-tab exclusion is turned off.
+- English is the default; switch to Chinese in the popup or settings. Language changes preserve unsaved settings drafts.
 
-The interface defaults to English. Click **中文 / EN** in the popup, or choose a language in Settings. Your choice is saved locally and shared between open extension pages. Switching languages preserves unsaved settings.
+The 420 × 580 popup fits at least seven complete rows. Menus stay within the popup, including for the last row.
 
-The compact 420 × 580 popup fits at least seven complete rows. Menus open above or below their anchor so actions remain accessible near the bottom of the list.
+## Title icon stages
 
-## Timing and recovery
+Choose **Weather**, **Plants**, or **Faces**, then customize the sequence. Color-circle and square presets are no longer included.
 
-The default color stops are 30 minutes, 2 hours, 6 hours, 12 hours, 1 day, 3 days, 7 days, and 30 days. Colors interpolate continuously on a logarithmic time scale and update about once a minute. Updates can be delayed while Chrome or the device sleeps.
+- Default: eight stages starting at zero, 30 minutes, 2 hours, 6 hours, 12 hours, 1 day, 3 days and 7 days.
+- Add or remove stages (2–16), adjust start times in minutes/hours/days, and select or paste one emoji per stage.
+- The first stage starts at zero. Later times must increase. The last stage remains until the page is marked read, snoozed or ignored.
+- Applying a preset replaces the draft sequence; changes only take effect after **Save changes**.
+- Drag the preview timeline to compare the stepped title icon and the continuous popup color without affecting real tabs.
 
-Navigating to a different path or query starts a new timer; fragment-only navigation does not. Tabs already open at installation start counting when first discovered.
+![Custom title icon settings](docs/emoji-settings.png)
 
-After a browser restart, saved records are matched to restored tabs by URL and position. Multiple tabs with identical URLs are matched on a best-effort basis. Unmatched records are cleaned after a two-minute startup recovery window. Closing an individual tab removes its record.
+## Popup colors and recovery
 
-Protected pages, PDF viewers, restrictive website policies, or unavailable original icons may prevent favicon changes. TabRot leaves the original icon intact when it cannot safely add a marker.
+Popup colors are independent of title stages. The original eight gradient stops remain: 30 minutes, 2 hours, 6 hours, 12 hours, 1 day, 3 days, 7 days and 30 days. Colors interpolate continuously on a logarithmic time scale. Reminders refresh about once a minute; sleep and browser scheduling may delay updates.
+
+Different paths or query parameters start a new timer; fragment-only navigation does not. Tabs open at installation begin counting when first discovered. Browser restarts match saved records to restored tabs by URL and position. Duplicate URLs are matched on a best-effort basis. Unmatched records are removed after a two-minute recovery window; closing an individual tab removes its record.
+
+On upgrade, existing timers, reading states, ignore rules and popup color timing are preserved. Old fixed emoji presets migrate to eight stages; removed color presets use Weather. Legacy favicon markers in open pages are restored when possible without a page reload. A closed page's stale bookmark icon may still require opening that exact bookmark once so Chrome refreshes its cache.
 
 ## Privacy and permissions
 
-Reading state, timers, snoozes, ignore rules, and language preferences stay in Chrome's local extension storage. Session storage holds the current browser session's tab bindings. No browsing data is sent to analytics or cloud services.
+Reading state, timers, settings and language preferences stay in local extension storage. Session storage holds current tab bindings. No data is uploaded. The extension does not access bookmarks or require the `bookmarks` permission.
 
 | Permission | Purpose |
 | --- | --- |
-| `tabs` | Read open-tab titles, URLs, and positions, and switch tabs. |
+| `tabs` | Read open-tab titles, URLs and positions, and switch tabs. |
 | `storage` | Save local settings and reading state. |
-| `alarms` | Refresh reminders at a low frequency. |
-| `scripting` | Apply favicon markers to existing pages. |
-| HTTP / HTTPS host access | Update page favicons and fetch the website's existing icon, without credentials or a referrer. |
+| `alarms` | Refresh reminders at low frequency. |
+| `scripting` | Apply title markers to pages already open. |
+| HTTP/HTTPS host access | Update page titles and restore legacy icon markers during upgrades. Legacy icon requests omit credentials and referrers. |
 
 ## Development
 
 ```sh
 npm test
 npm run check
+python3 tools/package.py
 ```
 
-The unit and lifecycle tests require Node.js 22 or later and no additional packages.
-
-Optional browser tests use an isolated profile and a local fixture server:
+Unit/lifecycle tests require Node.js 22 or later, with no additional packages. Optional real-browser tests use disposable profiles and local fixture servers:
 
 ```sh
 npm install --no-save playwright
 npx playwright install chromium
 node tools/browser-smoke.mjs
+node tools/browser-emoji.mjs
 node tools/browser-reload.mjs
+node tools/browser-bookmarks.mjs
+node tools/browser-bookmark-upgrade.mjs
+POISON_ORIGINAL=1 node tools/browser-bookmark-upgrade.mjs
+CLOSE_LEGACY_PAGE=1 node tools/browser-bookmark-upgrade.mjs
 ```
 
-The smoke test covers the actual extension, reading states, favicon restoration, navigation, ignore rules, settings, bilingual persistence, unsaved drafts, compact layout, menu placement, and browser restart recovery. Screenshots are written to `docs/`. The reload test checks pending icon requests while the extension reloads.
+The bookmark and upgrade fixtures grant bookmark/favicon access only to a disposable copy for setup and cache inspection; these permissions are absent from the production manifest. Tests cover actual title changes, custom stages, validation, preview, localization, layout, reading states, reloads, original cache pixels, upgrade recovery and browser restarts. Screenshots are saved to `docs/`.
 
-Use `CHROME_EXECUTABLE` for an existing Chrome for Testing executable, `PLAYWRIGHT_MODULE_PATH` for an existing Playwright package, or `PLAYWRIGHT_BROWSERS_PATH` for a custom browser cache.
+Use `CHROME_EXECUTABLE` for Chrome for Testing, `PLAYWRIGHT_MODULE_PATH` for an existing Playwright package, or `PLAYWRIGHT_BROWSERS_PATH` for a custom browser cache.
 
-To regenerate icons from the editable SVG:
-
-```sh
-npm install --no-save sharp
-node tools/icons.mjs
-```
-
-To package the extension:
-
-```sh
-python3 tools/package.py
-```
-
-After changing code, reload TabRot in `chrome://extensions`. Refresh existing pages if they still have a previous content script running.
+To regenerate icons: install `sharp` without saving it, then run `node tools/icons.mjs`. Reload TabRot in `chrome://extensions` after updating local code.
 
 ## Source
 
 | File | Purpose |
 | --- | --- |
-| `src/core.js` | Color interpolation, statuses, time labels, and tab matching. |
-| `src/background.js` | Event handling, persistence, messaging, and scheduled updates. |
-| `src/content-v1.0.2.js` | Favicon rendering and restoration, with callback-based messaging. |
-| `src/i18n.js` | English / Chinese messages and language preference. |
+| `src/core.js` | Gradient interpolation, custom emoji stages, validation, status and recovery matching. |
+| `src/background.js` | Events, persistence, messaging and scheduled updates. |
+| `src/content-v1.3.0.js` | Title markers, cleanup and legacy favicon recovery with callback messaging. |
+| `src/i18n.js` | English/Chinese interface and language preference. |
 | `src/popup.*` | Compact reading list. |
-| `src/options.*` | Settings. |
-| `icons/icon.svg` | Editable, transparent-background icon source. |
+| `src/options.*` | Settings and timeline preview. |
+| `icons/icon.svg` | Editable transparent icon. |

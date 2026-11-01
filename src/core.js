@@ -1,7 +1,32 @@
 export const MINUTE = 60_000;
 export const DEFAULT_THRESHOLDS = [30, 120, 360, 720, 1440, 4320, 10080, 43200];
 export const COLORS = ['#5eae89', '#a4b951', '#dfbf45', '#ec9947', '#e77448', '#cf514b', '#a73d47', '#743b43'];
-export const DEFAULT_SETTINGS = { thresholds: DEFAULT_THRESHOLDS, ignoredDomains: [], ignorePinned: true };
+export const EMOJI_THEMES = [
+  { id: 'weather', icons: ['☀️', '🌤️', '⛅', '☁️', '🌦️', '🌧️', '🌩️', '⛈️'] },
+  { id: 'plants', icons: ['🌱', '🌿', '🌳', '🌼', '🌻', '🍁', '🍂', '🥀'] },
+  { id: 'faces', icons: ['😌', '🙂', '🤔', '😐', '😟', '😰', '😫', '😱'] }
+];
+export const DEFAULT_STAGE_TIMES = [0, 30, 120, 360, 720, 1440, 4320, 10080];
+export const presetStages = id => (EMOJI_THEMES.find(theme => theme.id === id) || EMOJI_THEMES[0]).icons.map((icon, index) => ({ afterMinutes: DEFAULT_STAGE_TIMES[index], icon }));
+export function validEmoji(icon) {
+  if (typeof icon !== 'string' || icon.length > 40 || !/\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u.test(icon)) return false;
+  return [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(icon)].length === 1;
+}
+export function validateStages(stages) {
+  if (!Array.isArray(stages) || stages.length < 2 || stages.length > 16 || stages.some((stage, i) =>
+    !stage || !Number.isFinite(stage.afterMinutes) || stage.afterMinutes < 0 || stage.afterMinutes > 5256000 ||
+    (i === 0 ? stage.afterMinutes !== 0 : stage.afterMinutes <= stages[i - 1].afterMinutes))) throw new Error('invalidStages');
+  if (stages.some(stage => !validEmoji(stage.icon))) throw new Error('invalidEmoji');
+  return stages.map(({ afterMinutes, icon }) => ({ afterMinutes, icon }));
+}
+export function ageEmoji(ageMs, settings) {
+  const minutes = Math.max(0, ageMs / MINUTE), stages = settings.emojiStages || presetStages('weather');
+  return stages.findLast(stage => stage.afterMinutes <= minutes)?.icon || stages[0].icon;
+}
+export function unmarkedTitle(title, marker) {
+  return marker && title?.startsWith(`${marker} `) ? title.slice(marker.length + 1) : title;
+}
+export const DEFAULT_SETTINGS = { thresholds: DEFAULT_THRESHOLDS, ignoredDomains: [], ignorePinned: true, emojiStages: presetStages('weather') };
 
 export function pageKey(url) {
   try { const u = new URL(url); u.hash = ''; return u.href; } catch { return ''; }
@@ -24,7 +49,10 @@ export function normalizeDomain(input) {
 export function validateSettings(value) {
   if (!value || !Array.isArray(value.thresholds) || value.thresholds.length !== 8 || value.thresholds.some((t, i, a) => !Number.isFinite(t) || t <= 0 || t > 5256000 || (i > 0 && t <= a[i - 1]))) throw new Error('invalidThresholds');
   if (!Array.isArray(value.ignoredDomains) || typeof value.ignorePinned !== 'boolean') throw new Error('invalidSettings');
-  return { thresholds: [...value.thresholds], ignoredDomains: [...new Set(value.ignoredDomains.map(normalizeDomain))], ignorePinned: value.ignorePinned };
+  // Old versions had fixed presets. Keep other user settings and migrate supported
+  // presets to eight independent title stages; removed color presets use weather.
+  const emojiStages = value.emojiStages === undefined ? presetStages(value.emojiTheme) : validateStages(value.emojiStages);
+  return { emojiStages, thresholds: [...value.thresholds], ignoredDomains: [...new Set(value.ignoredDomains.map(normalizeDomain))], ignorePinned: value.ignorePinned };
 }
 export function ignoredReason(record, tab, settings) {
   if (record.ignored) return 'tab';

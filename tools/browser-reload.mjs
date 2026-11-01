@@ -29,22 +29,20 @@ const fs=require('node:fs/promises'),os=require('node:os'),http=require('node:ht
   await admin.evaluate(()=>chrome.developerPrivate.updateProfileConfiguration({inDeveloperMode:true}));
   const article=await context.newPage();const cdp=await context.newCDPSession(article);
   await cdp.send('Runtime.enable');cdp.on('Runtime.exceptionThrown',e=>exceptions.push(e.exceptionDetails));
-  await article.goto(origin);await article.waitForFunction(()=>document.querySelector('#icon').href.startsWith('data:'));
+  await article.goto(origin);await article.waitForFunction(()=>document.title.startsWith('☀️ '));
 
   for(let i=0;i<5;i++){
    await article.evaluate(i=>document.querySelector('#icon').href='/icon.svg?reload='+i,i);
-   const deadline = Date.now() + 4000;
-   while (!pendingWorkerIcons && Date.now() < deadline) await article.waitForTimeout(10);
-   assert.ok(pendingWorkerIcons > 0, 'reload must happen during an outstanding worker favicon fetch');
+   await article.evaluate(i=>{document.title='Updated '+i;},i);
    await admin.evaluate(id=>chrome.developerPrivate.reload(id,{failQuietly:true,populateErrorForUnpacked:true}),id);
    await article.waitForTimeout(500);
    const live=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
    await live.evaluate(async origin=>{
     const tabs=await chrome.tabs.query({});const tab=tabs.find(t=>t.url===origin+'/');
     await chrome.scripting.executeScript({target:{tabId:tab.id},files:chrome.runtime.getManifest().content_scripts[0].js});
-    await chrome.tabs.sendMessage(tab.id,{type:'RENDER',url:origin+'/',color:'#e77448'});
+    await chrome.tabs.sendMessage(tab.id,{type:'RENDER',url:origin+'/',titleMarker:'🌿'});
    },origin);
-   await article.waitForFunction(()=>document.querySelector('#icon').href.startsWith('data:'));
+   await article.waitForFunction(()=>document.title.startsWith('🌿 '));
    console.log('reload',i+1);
   }
   await article.waitForTimeout(2000);
@@ -54,6 +52,6 @@ const fs=require('node:fs/promises'),os=require('node:os'),http=require('node:ht
   assert.ok(extension);
   assert.deepEqual(extension.runtimeErrors, [], 'Chrome extension error collection must remain empty');
   assert.deepEqual(extension.manifestErrors, []);
-  console.log(`PASS: ${extension.version}, 5 reloads during pending favicon requests; fresh scripts render correctly and Chrome reports no errors.`);
+  console.log(`PASS: ${extension.version}, 5 reloads during title/favicon changes; fresh title scripts render correctly and Chrome reports no errors.`);
  }finally{await context.close();await new Promise(r=>server.close(r));await fs.rm(profile,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exit(1)});

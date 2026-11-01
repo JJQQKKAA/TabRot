@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, ageColor, isTrackable, pageKey, restoreMatch, snoozeTime, statusOf, validateSettings, normalizeDomain } from './core.js';
+import { DEFAULT_SETTINGS, ageColor, isTrackable, pageKey, restoreMatch, snoozeTime, statusOf, validateSettings, normalizeDomain, ageEmoji, unmarkedTitle } from './core.js';
 
 let state, bindings, bootTime;
 let savedLocal = null, savedSession = null;
@@ -38,7 +38,7 @@ function newRecord(tab) {
 }
 function bind(tab, record) {
   bindings[tab.id] = record.id;
-  Object.assign(record, { url: pageKey(tab.url), title: tab.title || tab.url, windowId: tab.windowId, index: tab.index });
+  Object.assign(record, { url: pageKey(tab.url), title: unmarkedTitle(tab.title, record.titleMarker) || tab.url, windowId: tab.windowId, index: tab.index });
   // Never persist our generated icon as the original.
   if (!record.favicon && tab.favIconUrl && !tab.favIconUrl.startsWith('data:')) record.favicon = tab.favIconUrl;
 }
@@ -67,12 +67,16 @@ async function ensureTab(tab) {
 }
 async function deliver(tab, record, inject = false) {
   if (!record || tab.discarded) return;
-  const message = { type: 'RENDER', url: record.url, color: statusOf(record, tab, state.settings) === 'unread' ? ageColor(Date.now() - record.openedAt, state.settings.thresholds) : null };
+  const titleMarker = statusOf(record, tab, state.settings) === 'unread' ? ageEmoji(Date.now() - record.openedAt, state.settings) : null;
+  if (record.titleMarker !== titleMarker) { record.titleMarker = titleMarker; await persist(); }
+  // All tab reminders use titles. Favicon URLs are only used to repair old
+  // extension-generated icons during upgrades, never to create new markers.
+  const message = { type: 'RENDER', titleMarker, repairLegacyIcons: true, originalFavicon: record.favicon || null, currentFavicon: tab.favIconUrl || null, url: record.url };
   try { await chrome.tabs.sendMessage(tab.id, message); }
   catch {
     if (!inject) return;
     try {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['src/content-v1.0.2.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['src/content-v1.3.0.js'] });
       await chrome.tabs.sendMessage(tab.id, message);
     } catch { /* Protected documents and suspended pages safely keep their favicon. */ }
   }
@@ -122,6 +126,11 @@ async function handle(message, sender) {
   if (message.type === 'HELLO' && sender.tab) {
     const tab = await chrome.tabs.get(sender.tab.id);
     const record = await ensureTab(tab); await persist(); await deliver(tab, record); return {};
+  }
+  if (message.type === 'SOURCE_TITLE' && sender.tab) {
+    const record = state.records[bindings[sender.tab.id]];
+    if (record && pageKey(message.url) === record.url && typeof message.title === 'string') { record.title = message.title.slice(0, 10000); await persist(); }
+    return {};
   }
   if (message.type === 'SOURCE_ICON' && sender.tab) {
     const record = state.records[bindings[sender.tab.id]];
